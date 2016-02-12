@@ -48,6 +48,8 @@ cabal-version:       >=1.10
 
 executable mine
   -- .hs or .lhs file containing the Main module.
+  ghc-options:
+        -O2
   main-is: mimg.hs
   
   -- Modules included in this executable, other than Main.
