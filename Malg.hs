@@ -1,9 +1,6 @@
 module Malg
 ( CIdx,
   Cell(Mine,Digit,Closed),
-  Show, Eq,
-  Functor,
-  Monad,
   Prob,Field, FieldArr, field, CountType, getArr, (>!),
   getix, getiy, getSurrIdx,
   getClosedNearDigits,
@@ -16,34 +13,22 @@ module Malg
   sortActionsProb,
   getBestAction,
   mineCnt, closedCnt,
-  getAllClosed,
-  choose
- -- ActIntersectable
+  getAllClosed
 ) 
 where  
 
-import Data.Array
 import Control.Monad.ST
+import Data.Array
 import Data.Array.ST
 import qualified Data.Vector as V
---import Data.Array.Diff
 import Data.List
+import Data.Function
 import qualified Data.List.Ordered as OL
 import Data.Ord
 import Control.Monad
-import Control.Monad.State
-import System.IO.Unsafe
---import Debug.Trace
 import Data.Ratio
+import Data.Int
 
-{-|
-class ActInters a where
-	intersectActions :: (Eq b, Ord b) => a b -> a b -> a b
-	joinActions :: (Show b, Eq b, Ord b) => a b -> a b -> a b
-	imposs :: a b
-	retacts :: (b -> Bool) -> b -> a b
-	retempty :: Field -> (CIdx -> b) -> a b
--}
 class ActInters a where
 	intersectActions :: a -> a -> a
 	joinActions :: a -> a -> a
@@ -57,12 +42,14 @@ type CIdx = (Int,Int)
 type FieldArr = Array CIdx Cell
 data Field = Field {getArr :: FieldArr, getClosedCnt :: Int, getMineCnt :: Int}
 
---infixl 1 `!! 
 (>!) :: Field -> CIdx -> Cell
 (Field arr _ _) >! cidx = arr!cidx
 
-closedCnt fld = fromIntegral $ getClosedCnt fld
-mineCnt fld = fromIntegral $ getMineCnt fld
+closedCnt :: (Num a) => Field -> a
+closedCnt = fromIntegral.getClosedCnt
+
+mineCnt :: (Num a) => Field -> a
+mineCnt = fromIntegral.getMineCnt
 
 field :: Array CIdx Cell -> Field
 field fldarr = Field fldarr (closedCntCount fldarr) (mineCntCount fldarr)
@@ -76,55 +63,15 @@ data Actions = Actions {getActions :: [Action]} | Impossible deriving(Eq, Show)
 type Prob = Ratio Integer
 --type Prob = Double
 type ActProb = (Prob,Action)
-
-
 type ActProbColl = V.Vector (ActProb)
 
-{-|
-fNX = 30
-fNY = 16
-fN = fNX*fNY
-fNN = fN + 1
+type EnsArrType = STArray
+type EnsArrCountType = Integer
 
-ind2xy :: Int -> (Int,Int)
-ind2xy ind
-	| ind == fN = (-1,-1)
-	| otherwise = ((ind `mod` fNX)+1, (ind `div` fNX) + 1)
-
-xy2ind :: (Int,Int) -> Int
-xy2ind (-1,-1) = fN
-xy2ind (ix,iy) = (iy - 1)*fNX + (ix - 1)
-
-actProbCollS v = V.singleton v
-actProbCollE = V.generate fNN (\ind -> (0, Open $ ind2xy ind))
-actProbColl lst = V.fromList lst
-actProbCollToList coll = V.toList coll
-
-actProbMergeBy :: (ActProb -> ActProb -> Ordering) -> ActProbColl -> ActProbColl -> ActProbColl
-actProbMergeBy comp a1l a2l 
-	| l1 == 1 && l2 == 1 = actProbMergeBy comp (actProbCollE V.// [(i1,h1)]) a2l
-	| l1 == 1 &&  l2 == fNN = a2l V.// [(i1, (p1 + (fst $ a2l V.! i1),a1))]
-	| l1 == fNN && l2 == 1 = a1l V.// [(i2, (p2 + (fst $ a1l V.! i2),a2))]
-	| l1 == fNN && l2 == fNN = V.zipWith (\(p1,a1) (p2, a2) -> (p1+p2,a1)) a1l a2l
-	| otherwise = error ("actProbMergeBy: l1=" ++ (show l1) ++ " l2=" ++ (show l2))
---	| a1 == a2 = error "actProbMergeBy: equal element in vectors to merge"
-	where 
-		l1 = V.length a1l
-		l2 = V.length a2l
-		h1@(p1,a1) = V.head a1l
-		h2@(p2,a2) = V.head a2l
-		i1 = xy2ind $ getIdx a1
-		i2 = xy2ind $ getIdx a2
-	--OL.mergeBy actCompInProbAct a1l a2l
-	--V.fromList $ OL.mergeBy comp (V.toList a1l) (V.toList a2l)
-
-actMergeWithProb = actProbMergeBy
--}
-
-actProbCollS v = V.singleton v
+actProbCollS = V.singleton
 actProbCollE = V.empty
-actProbColl lst = V.fromList lst
-actProbCollToList coll = V.toList coll
+actProbColl = V.fromList
+actProbCollToList = V.toList
 
 actProbMergeBy :: (ActProb -> ActProb -> Ordering) -> ActProbColl -> ActProbColl -> ActProbColl 
 actProbMergeBy comp a1l a2l 
@@ -135,12 +82,10 @@ actProbMergeBy comp a1l a2l
 	where 
 		l1 = V.length a1l
 		l2 = V.length a2l
-		h1@(p1,a1) = V.head a1l
-		h2@(p2,a2) = V.head a2l
+		h1@(_,a1) = V.head a1l
+		h2@(_,a2) = V.head a2l
 		t1 = V.tail a1l
 		t2 = V.tail a2l
-	--OL.mergeBy actCompInProbAct a1l a2l
-	--V.fromList $ OL.mergeBy comp (V.toList a1l) (V.toList a2l)
 
 actMergeWithProb :: (ActProb -> ActProb -> Ordering) -> Prob -> ActProbColl -> Prob -> ActProbColl -> ActProbColl 
 actMergeWithProb actCompInProbAct mulleft acts1m mulright acts2m 
@@ -158,68 +103,32 @@ actMergeWithProb actCompInProbAct mulleft acts1m mulright acts2m
 		t1 = V.tail acts1m
 		t2 = V.tail acts2m
 		
---	acts
---	where
---		actsg = groupBy actEqInProbAct $ OL.mergeBy actCompInProbAct (V.toList acts1m) (V.toList acts2m)
---		acts = V.fromList $ map (foldl1 (\(psum, actsum) (p, act) -> (psum+p, act))) actsg
-
-
-
-{-|
-type ActProbColl a = [] (ActProb a)
-actProbCollS v = [v]
-actProbCollE = []
-actProbColl lst = lst
-actProbCollToList coll = coll
-
-actProbMergeBy :: (Ord a) => (ActProb a -> ActProb a -> Ordering) -> ActProbColl a -> ActProbColl a -> ActProbColl a
-actProbMergeBy comp a1l a2l =
-	--OL.mergeBy actCompInProbAct a1l a2l
-	OL.mergeBy comp a1l a2l
-
-actMergeWithProb :: (Ord a) => (ActProb a -> ActProb a -> Ordering) -> ActProbColl a -> ActProbColl a -> ActProbColl a
-actMergeWithProb actCompInProbAct acts1m acts2m =
-	acts
-	where
-		actsg = groupBy actEqInProbAct $ OL.mergeBy actCompInProbAct acts1m acts2m
-		acts = map (foldl1 (\(psum, actsum) (p, act) -> (psum+p, act))) actsg
--}
-
 data ActionsProb = ActionsProb {getActionsProb :: ActProbColl, getEnsNum :: CountType} | ImpossibleP deriving(Show)	
 
-aintersect a1l a2l = OL.isect a1l a2l
-
 choose :: (Integral a, Show a) => a -> a -> a
-choose n 0 = 1
-choose 0 k = 0
+choose _ 0 = 1
+choose 0 _ = 0
 choose n k 
 	| k > n = error $ "choose k > n (k=" ++ (show k) ++ " n=" ++ (show n) ++ ")"
 	| otherwise = choose (n-1) (k-1) * n `div` k
 
 	
---intersectActions :: (Eq a) => Actions a -> Actions a -> Actions a
 instance ActInters Actions where
---joinActions :: Actions a -> Actions a -> Actions a
 	imposs = Impossible
 	retacts _ act = Actions [act]
-	retempty fld _ = Actions []
+	retempty _ _ = Actions []
 	
-	joinActions Impossible a2 = Impossible
-	joinActions a1 Impossible = Impossible
-	joinActions (Actions a1l) (Actions a2l) = Actions (OL.merge a1l a2l)
+	joinActions Impossible _ = Impossible
+	joinActions _ Impossible = Impossible
+	joinActions a1 a2 = Actions $ (OL.merge `on` getActions) a1 a2
 
 	intersectActions Impossible a2 = a2
 	intersectActions a1 Impossible = a1
 	intersectActions (Actions []) (Actions _) = error "intersecting with empty list"
 	intersectActions (Actions _) (Actions []) = error "intersecting with empty list"
-	intersectActions (Actions a1l) (Actions a2l) = Actions $ aintersect a1l a2l
+	intersectActions a1 a2 = Actions $ (OL.isect `on` getActions) a1 a2
 
-actCompInProbAct :: ActProb -> ActProb -> Ordering
-actCompInProbAct (p1,a1) (p2,a2) = compare a1 a2
-
-actEqInProbAct :: ActProb -> ActProb -> Bool
-actEqInProbAct (p1,a1) (p2,a2) = (a1 == a2)
-
+actCompInProbAct = compare `on` snd
 
 instance ActInters ActionsProb where
 	imposs = ImpossibleP
@@ -231,8 +140,6 @@ instance ActInters ActionsProb where
 	
 	retempty fld freeact
 		| freecnt >= 1 = ActionsProb (actProbCollS (fromRational(freeprob), freeact (-1,-1) )) freecnt
---		| freecnt >= 1 = ActionsProb (map (\ind -> (freeprob, freeact ind)) (getAllClosed fld)) (freecnt)
---		| freecnt >= 1 = ActionsProb [] (freecnt)
 		| freecnt <= 0 = error ("retempty (prob): freecnt <= 0: closedCnt=" ++ (show  c) ++ " mCnt=" ++ (show m))
 		where 
 			c = (closedCnt fld)
@@ -244,7 +151,7 @@ instance ActInters ActionsProb where
 	joinActions a1 ImpossibleP = ImpossibleP
 	joinActions (ActionsProb a1l nens1) (ActionsProb a2l nens2) 
 		| nens == 0 = error ("nens==0 on join: " ++ (show (a1l,nens1)) ++ (show (a2l,nens2)))
-		| otherwise = ActionsProb {getActionsProb=(actProbMergeBy actCompInProbAct a1l a2l), getEnsNum = nens}
+		| otherwise = ActionsProb (actProbMergeBy actCompInProbAct a1l a2l) nens
 		where
 			nens = nens1*nens2
 
@@ -253,7 +160,6 @@ instance ActInters ActionsProb where
 	intersectActions (ActionsProb a1l ens1) (ActionsProb a2l ens2) 
 		| a1l == actProbCollE || a2l == actProbCollE = error "intersecting with empty list"
 		| totens == 0 = error "totens==0 on intersect"
---		| ll >= 30*16 = error "too long list in ActionsProb"
 		| otherwise = ActionsProb acts totens
 		where
 			totens = ens1+ens2
@@ -263,16 +169,15 @@ instance ActInters ActionsProb where
 
 
 getix :: CIdx -> Int
-getix (ix,_) = ix
+getix = fst
 getiy :: CIdx -> Int
-getiy (_,iy) = iy
+getiy = snd
 
 getSurrIdx :: Field -> CIdx -> [CIdx]
-getSurrIdx fld (ix,iy) = do
-	(ixs,iys) <- [(ix-1,iy-1), (ix,iy-1), (ix+1,iy-1),(ix+1,iy),(ix+1,iy+1),(ix,iy+1),(ix-1,iy+1),(ix-1,iy)]
-	let (_,(nx,ny)) = bounds $ getArr fld
-	guard (ixs >= 1 && ixs <= nx && iys >= 1 && iys <= ny)
-	return (ixs,iys)
+getSurrIdx fld (ix,iy) = 
+	[(ixs,iys) | ixs <- [ix-1..ix+1], iys <- [iy-1..iy+1] , ixs /= ix || iys /= iy, ixs >= 1, ixs <= nx, iys >= 1, iys <= ny]
+	where
+		(_,(nx,ny)) = bounds $ getArr fld
 
 getSurrCells :: Field -> CIdx -> [Cell]
 getSurrCells fld ind = fmap ((getArr fld)!) (getSurrIdx fld ind)
@@ -447,9 +352,8 @@ sortActionsProb (ActionsProb lst enscnt) = ActionsProb {getActionsProb = actProb
 sortActionsProb ImpossibleP = ImpossibleP
 
 evalAct :: Field -> [CIdx] -> Action -> Int
-evalAct fld chain act 
---	| actions == Impossible = error ("evalAct: got Impossible actions: action tested: " ++ (show act))
-	| otherwise = if inchain 
+evalAct fld chain act =
+	if inchain 
 			then
 				10 + (length $ filter (\act -> case act of 
 					Open _ -> True
@@ -489,8 +393,7 @@ getAllClosed fld = filter (isClosedC.(fld>!)) (range $ bounds $ getArr fld)
 
 
 
---tryActionPM :: Field -> [CIdx] -> (CIdx -> Action) -> ST s (STArray s (Int,Int) Integer) -> ST  s (STArray s (Int,Int) Integer)
-tryActionPM :: Field -> [CIdx] -> (CIdx -> Action) -> Integer -> STArray s (Int,Int) Integer -> [CIdx] -> ST s (Integer)
+tryActionPM :: Field -> [CIdx] -> (CIdx -> Action) -> EnsArrCountType -> EnsArrType s (Int,Int) EnsArrCountType -> [CIdx] -> ST s (EnsArrCountType)
 tryActionPM fld (cc:chain) acttype enscnt arr toopencells
 	| isPossible = findActionsPM (updSurrDig fld act) chain enscnt arr nextcells
 	| otherwise = return enscnt
@@ -501,30 +404,20 @@ tryActionPM fld (cc:chain) acttype enscnt arr toopencells
 				Open _ -> cc:toopencells
 				_ -> toopencells
 
---findActionsPM :: Field -> [CIdx] -> Integer -ST  s (STArray s (Int,Int) Integer) -> ST  s (STArray s (Int,Int) Integer)
-findActionsPM :: Field -> [CIdx] -> Integer -> STArray s (Int,Int) Integer -> [CIdx] -> ST s (Integer)
-findActionsPM fld [] enscnt arri toopencells = 
+findActionsPM :: Field -> [CIdx] -> EnsArrCountType -> EnsArrType s (Int,Int) EnsArrCountType -> [CIdx] -> ST s (EnsArrCountType)
+findActionsPM fld [] enscnt arr toopencells = 
 	do
-		--arr <- unsafeThaw arri
-		let
-			arr = arri
 		let 
-			--toopencells = (filter (isToOpenC.(fld>!)) (range $ bounds $ getArr fld))
 			c = (closedCnt fld)
 			m = 99 - (mineCnt fld)
 			freecnt = choose c m
 			ffreeind = head $ (filter (isClosedC.(fld>!)) (range $ bounds $ getArr fld))
 			freecntpercell = if c == m then 0 else choose (c - 1) m
 		
-		{-|
-		foldM_ (\_ ind -> do
-					cnt <- readArray arr ind
-					cnt `seq` writeArray arr ind (cnt + freecnt)
-			) () toopencells
-		-}
-		forM_ toopencells (\ind -> do
-					cnt <- readArray arr ind
-					cnt `seq` writeArray arr ind (cnt + freecnt)
+		forM_ toopencells
+			(\ind -> do
+				cnt <- readArray arr ind
+				cnt `seq` writeArray arr ind (cnt + freecnt)
 			) 
 		
 		if c > 0 then do
@@ -556,11 +449,9 @@ findActions2 fld chain
 	where
 		(arr,enscnt) = 
 			runST $ do
-					arra <- newArray ((1,1),(30,16)) 0  :: ST s (STArray s (Int,Int) Integer)
+					arra <- newArray ((1,1),(30,16)) 0  :: ST s (EnsArrType s (Int,Int) EnsArrCountType)
 					e_cnt <- findActionsPM fld chain 0 arra []
 					elems <- freeze arra
-					return (elems,e_cnt)
-
-		--enscnt = sum [arr!ind | ind <- range $ bounds arr]
-		actproblst = [ (fromRational((arr!ind) % enscnt), if ind `elem` chain then Open ind else Open (-1,-1)) | ind <- range $ bounds arr, arr!ind > 0]
+					return (elems,fromIntegral e_cnt)
+		actproblst = [ (fromRational((fromIntegral $ arr!ind) % enscnt), if ind `elem` chain then Open ind else Open (-1,-1)) | ind <- range $ bounds arr, arr!ind > 0]
 

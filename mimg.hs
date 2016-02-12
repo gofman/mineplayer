@@ -1,30 +1,21 @@
 import Graphics.GD
 import Data.Bits
 import Data.List
+import Data.Maybe
 import Data.Ord
 import Control.Monad
-import Control.Monad.Zip
-import Control.Monad.State
 import System.IO.Unsafe
 import Data.Array.Unboxed
-import Data.Array.Unsafe
 import qualified Data.Array.MArray as MA
-
-import qualified Data.Array as A
 import Data.Int
 import Data.Word
-import Data.Bits
-import Data.Ratio
-
-import System.IO
 import System.Process
 import System.Exit
-import qualified Data.Foldable as F
 import Malg 
 import qualified Graphics.UI.Gtk as G
 import Text.Printf
 import System.Environment
-import GHC.Conc
+--import GHC.Conc
 import Control.Exception
 
 data PictGeom = PictGeom { x1 :: Int, y1 :: Int, sx :: Int, sy :: Int, nx :: Int, ny :: Int} deriving(Show)
@@ -48,7 +39,6 @@ statRefG = [
 statRefK :: [(PictCellStat, Cell)]
 statRefK = [
 		(PictCellStat {avghs=(0.0,0.0,0.0), sq=0.0}, Digit 0),
-		
 		(PictCellStat {avghs=(239.1,0.828,0.585), sq=0.196}, Digit 1),
 		(PictCellStat {avghs=(118.5,0.68,0.40), sq=0.233}, Digit 2),
 		(PictCellStat {avghs=(61.04,0.70,0.38), sq=0.241}, Digit 3),
@@ -56,19 +46,9 @@ statRefK = [
 		(PictCellStat {avghs=(1.5,0.85,0.58), sq=0.236}, Digit 5),
 		(PictCellStat {avghs=(1.7,0.79,0.34), sq=0.240}, Digit 6),
 		(PictCellStat {avghs=(178.5,0.79,0.34), sq=0.159}, Digit 7),
-		
 		(PictCellStat {avghs=(0.0,0.86,0.43), sq=0.139}, Mine)
 	  ]
 
-
-{-|
-instance (Ix i, IArray ar a, IArray ar a) => Functor (UArray i) where
-	--fmap :: (IArray UArray a, IArray UArray b) => (a -> b) -> UArray i a -> UArray i b
-	fmap f arr = 
-		array bnds [(i, f (arr!i)) | i <- range bnds]
-		where
-			bnds = bounds arr
--}
 
 fmapA :: (Ix i, IArray ar a, IArray ar b) => (a -> b) -> ar i a -> ar i b
 fmapA f arr = 
@@ -84,46 +64,31 @@ setPixR img pnt (r,g,b,a) = setPixel pnt (rgba r g b a) img
 setPixRc img pnt clr = 
 	do 
 		setPixel pnt clr img
-		--print pnt
-setPixRcz img _ (pnt,clr) = 
-	do 
-		setPixel pnt clr img
-		--print pnt
 
-setPixRiz img _ (pnt,int) = 
-	do 
-		setPixel pnt (rgba int int int 0) img
+setPixRcz img _ (pnt,clr) = setPixel pnt clr img
+
+setPixRiz img _ (pnt,int) =  setPixel pnt (rgba int int int 0) img
 		
 setIntArrPix :: Image -> UArray (Int, Int) Int32 -> IO ()
-setIntArrPix img arr =
-	do
-	tmp <- sequence_ [ let 
-			       (r,g,b) =  int32toRGB (arr!ind)
-			   in 
-			      setPixel ind (rgba r g b 0) img | ind <- range bnds ]
-	return ()
+setIntArrPix img arr = 
+	sequence_ 
+	[let 
+		(r,g,b) =  int32toRGB (arr!ind)
+	 in 
+		setPixel ind (rgba r g b 0) img | ind <- range bnds ]
 	where
 		bnds = bounds arr
-
 
 intensity :: (Int,Int,Int) -> Float
 intensity (r,g,b) = (0.30*(fromIntegral r) + 0.59*(fromIntegral g) + 0.11*(fromIntegral b))
 
-
-
 allPoints :: Int -> Int -> [(Int, Int)]
 allPoints wx wy = [(a, b) | a <- [1..wx], b <- [1..wy]]
-{-|	do
-		a <- [1..wx]
-		b <- [1..wy]
-		return (a,b)
--}
 
 allClrs wx wy = [(a, b) | a <- [1..wx], b <- [1..wy]]
 
 int_diff :: (Ord a, Num a) => a -> a -> a
 int_diff c1 c2 = min (2*abs(c2-c1)) 255
-
 
 cint32 c = fromIntegral(c) :: Int32
 
@@ -154,7 +119,6 @@ list2arr nx ny lst = array ((1,1),(nx,ny)) (zip [(ix, iy) | ix <- [1..nx], iy <-
 
 getCellPix :: UArray (Int,Int) Int32 -> PictGeom -> Int -> Int -> UArray (Int,Int) Int32
 getCellPix img g icx icy =
-	--array bnds [(ind, img!ind) | ind <- range bnds ]
 	ixmap bnds (\x -> x) img
 	where
 		bnds = (((x1 g) + (icx-1)*(sx g), (y1 g) + (icy-1)*(sy g)), ((x1 g) + icx*(sx g) - 1, (y1 g) + icy*(sy g) - 1))
@@ -195,17 +159,6 @@ acorr2max h v = g
 		ah0 = acorr h 0
 		av0 = acorr v 0
 		(m, g) = maximumBy (comparing fst) [ ( (acorr h gap)/ah0 + (acorr v gap)/av0, gap) | gap <- [5..((min nx ny) `div` 5)] ]
-
-{-|
-calcsxsy :: UArray (Int) Float -> UArray (Int) Float -> Int -> (Int, Int)
-calcsxsy h v hsz =
-	(sx+1, sy+1)
-	where
-		(_,nx) = bounds v
-		(_,ny) = bounds h
-		(_,sy) = maximumBy (comparing fst) [ (h!i,i) | i <- [(hsz `div` 2)..(ny `div` 4)] ]
-		(_,sx) = maximumBy (comparing fst) [ (v!i,i) | i <- [(1)..(nx `div` 4)] ]
--}
 
 testShift :: UArray (Int) Float -> Int -> Int -> Int -> Float
 testShift hv sz shift n =
@@ -249,9 +202,7 @@ calcGeom clrs =
 		vs = vertsum $ diff_x ints
 		hsz = acorr2max hs vs
 		(nxc, nyc) = (30,16)
-		--(ox,oy) = calcsxsy hs vs hsz
 		(_,oy) = calcsxsy hs vs hsz nxc nyc
-		--(nxc, nyc) = calcnxny wx wy hsz ox oy
 		ox = (wx - nxc*hsz) `div` 2
 
 removegray :: (Int, Int, Int) -> (Int, Int,Int)
@@ -259,7 +210,6 @@ removegray (r, g, b)
 	| abs(r - g) < 10 && abs (g - b) < 10 = (0,0,0)
 	| otherwise = (r,g,b)
 
--- data PictCellStat = PictCellStat { avgH :: Float, avgV :: Float, sq :: Float} deriving(Show)
 nonzclr :: (Int, Int, Int) -> Float
 nonzclr (r, g, b) 
 	| r /= 0 || g /= 0 || b /= 0 = 1.0
@@ -342,87 +292,77 @@ parseField img g rstat =
 		cbnds = ((1,1),(nx g, ny g))
 
 drawCell :: Image -> PictGeom -> (Int,Int) -> Cell -> IO ()
-drawCell img g ind cell =
-	do
-		let s = show cell
-		let icx = (fst ind) - 1
-		let icy = (snd ind) - 1
+drawCell img g ind cell = void $ 
+	let 
+		s = show cell
+		icx = (fst ind) - 1
+		icy = (snd ind) - 1
+	in
 		drawString "variable" 12.0 0.0 ((x1 g) + icx*(sx g),(y1 g)+12 + icy*(sy g)) s (rgba 255 0 0 0) img
-		return ()
 		
 drawAction :: Image -> PictGeom -> Action -> IO ()
-drawAction img g (SetM ind) =
-	do
-		let icx = (fst ind) - 1
-		let icy = (snd ind) - 1
-		let cwx = sx g
-		let cwy = sy g
+drawAction img g (SetM ind) = void $
+	let
+		icx = (fst ind) - 1
+		icy = (snd ind) - 1
+		cwx = sx g
+		cwy = sy g
+	in
 		drawFilledEllipse ((x1 g) + icx*cwx + (cwx `div` 2),(y1 g) + icy*cwy + (cwy `div` 2)) (cwx, cwy) (rgba 255 0 0 0) img
-		return ()
-drawAction img g (Open ind) =
-	do
-		let icx = (fst ind) - 1
-		let icy = (snd ind) - 1
-		let cwx = sx g
-		let cwy = sy g
+
+drawAction img g (Open ind) = void $
+	let
+		icx = (fst ind) - 1
+		icy = (snd ind) - 1
+		cwx = sx g
+		cwy = sy g
+	in
 		drawFilledEllipse ((x1 g) + icx*cwx + (cwx `div` 2),(y1 g) + icy*cwy + (cwy `div` 2)) (cwx, cwy) (rgba 0 255 0 0) img
-		return ()
 		
 drawActions imgnew g (Actions acts1) = forM_ (acts1) (\act -> drawAction imgnew g act )
-drawActions imgnew g Impossible = return ()
+drawActions imgnew _ Impossible = return ()
 
 
 setMouseTo :: PictGeom -> Action -> IO ()
-setMouseTo g act = 
-	do
-		let (ind,mb) = case act of
+setMouseTo g act = void $
+	let 
+		(ind,mb) = case act of
 			Open ind_ -> (ind_,1)
 			SetM ind_ -> (ind_,3)
-		let 
-			icx = (fst ind) - 1
-			icy = (snd ind) - 1
-			cwx = sx g
-			cwy = sy g
-			mx = (x1 g) + icx*cwx + (cwx `div` 2)
-			my = (y1 g) + icy*cwy + (cwy `div` 2)
-		excode <- system $ "xdotool search --onlyvisible \"Mines\" windowactivate mousemove --sync --window \"%1\" " ++ (show mx) ++ " " ++ (show my)
-		return ()
+		icx = (fst ind) - 1
+		icy = (snd ind) - 1
+		cwx = sx g
+		cwy = sy g
+		mx = (x1 g) + icx*cwx + (cwx `div` 2)
+		my = (y1 g) + icy*cwy + (cwy `div` 2)
+	in
+		system $ "xdotool search --onlyvisible \"Mines\" windowactivate mousemove --sync --window \"%1\" " ++ (show mx) ++ " " ++ (show my)
 
 playAction :: PictGeom -> Action -> IO ()
-playAction g act =
-	do
-		let (ind,mb) = case act of
+playAction g act = void $
+	(system $ "xdotool search --onlyvisible \"Mines\" windowactivate mousemove --sync --window \"%1\" " ++ (show mx) ++ " " ++ (show my) ++ " click " ++ show mb)
+	where
+		(ind,mb) = case act of
 			Open ind_ -> (ind_,1)
 			SetM ind_ -> (ind_,3)
-			
-		let 
-			icx = (fst ind) - 1
-			icy = (snd ind) - 1
-			cwx = sx g
-			cwy = sy g
-			mx = (x1 g) + icx*cwx + (cwx `div` 2)
-			my = (y1 g) + icy*cwy + (cwy `div` 2)
-			
-		excode <- system $ "xdotool search --onlyvisible \"Mines\" windowactivate mousemove --sync --window \"%1\" " ++ (show mx) ++ " " ++ (show my) ++ " click " ++ show mb
-		if (excode == ExitSuccess) then return () else error "could not move mouse pointer" 
---		excode <- system $ "xdotool click " ++ show mb
---		if (excode == ExitSuccess) then return () else error "could not move mouse pointer" 
-		return ()
+		icx = (fst ind) - 1
+		icy = (snd ind) - 1
+		cwx = sx g
+		cwy = sy g
+		mx = (x1 g) + icx*cwx + (cwx `div` 2)
+		my = (y1 g) + icy*cwy + (cwy `div` 2)
 
 playActions :: PictGeom -> Actions -> IO ()
 playActions _ Impossible = return ()
-playActions g acts =
-	do
-		--windids <- readProcess "/usr/bin/xdotool" ["search","Mines"] ""
-		--let wndid = (words windid)!!1
-		forM_ (getActions acts) (\act -> playAction g act)
-		return ()
+playActions g acts = forM_ (getActions acts) (\act -> playAction g act)
 
 playActionsJ :: PictGeom -> Actions -> IO ()
 playActionsJ _ Impossible = return ()
 playActionsJ g acts =
-	do
-		let str = concat $ map (\act ->  let
+	(system $ "xdotool search --onlyvisible \"Mines\" windowactivate" ++ str)
+	>>= (\excode -> if (excode == ExitSuccess) then return () else error "could not move mouse pointer")
+	where
+		str = concat $ map (\act ->  let
 					(ind,mb) = case act of
 						Open ind_ -> (ind_,1)
 						SetM ind_ -> (ind_,3)	
@@ -432,11 +372,9 @@ playActionsJ g acts =
 					cwy = sy g
 					mx = (x1 g) + icx*cwx + (cwx `div` 2)
 					my = (y1 g) + icy*cwy + (cwy `div` 2)
-				in
-					" mousemove --window=%1 " ++ (show mx) ++ " " ++ (show my) ++ " click " ++ (show mb)
-		     ) (getActions acts)
-		excode <- system $ "xdotool search --onlyvisible \"Mines\" windowactivate" ++ str
-		if (excode == ExitSuccess) then return () else error "could not move mouse pointer" 
+					in
+						" mousemove --window=%1 " ++ (show mx) ++ " " ++ (show my) ++ " click " ++ (show mb)
+		                   ) (getActions acts)
 
 get3fromWord32 :: UArray Int Word32 -> Int -> (Int,Int,Int)
 get3fromWord32 arr pos =
@@ -469,42 +407,26 @@ getPixelsFromPixbuf pbuf =
 		wy <- G.pixbufGetHeight pbuf
 		rs <- G.pixbufGetRowstride pbuf
 		nch <- G.pixbufGetNChannels pbuf
-		--putStrLn $ printf "wx=%d wy=%d rs=%d nch=%d" wx wy rs nch
 		clrsw <- pbData `seq` (MA.freeze pbData) :: IO (UArray Int Word32)
-				
-		return (clrsw `seq` (getPixelsFromPB clrsw wx wy rs nch))
+		return $ clrsw `seq` (getPixelsFromPB clrsw wx wy rs nch)
 		
-	--array ((1,1),(wx,wy)) [ ((ix,iy),color2int $ unsafePerformIO $ getPixel (ix,iy) img) | ix <- [1..wx], iy <- [1..wy]]
-	--where
-	--	(wx, wy) =  unsafePerformIO $ imageSize img
-
 grabWindow :: IO (UArray (Int, Int) Int32)
 grabWindow = 
 	do 
 		winidstr <- readProcess "xdotool" ["search","--onlyvisible", "Mines", "windowactivate","search","--onlyvisible", "Mines"] ""
-		threadDelay 40000
+		--threadDelay 40000
 		let 
 			winid = read winidstr
 		print winid
-		--system "xdotool search --onlyvisible \"Mines\" windowactivate"
-		--if (excode == ExitSuccess) then return () else error "could not activate window" 
-		--G.initGUI
 		mwnd <- G.drawWindowForeignNew $ G.toNativeWindowId winid
-		--mwnd <- G.drawWindowGetDefaultRootWindow
 		let
-			(Just wnd) = mwnd
-		--G.drawWindowRaise wnd
-		--excode <- system "usleep 200000"
-		--excode <- system "gnome-screenshot -w -B -f /tmp/qq.png"
-		--if (excode == ExitSuccess) then return () else error "could not grab window" 
+			wnd = fromJust mwnd
+
 		(wx,wy) <- G.drawableGetSize wnd
 		mpbuf <- wnd `seq` G.pixbufGetFromDrawable wnd (G.Rectangle 0 0 wx wy)
 		let
 			(Just pbuf) = mpbuf
 		
-		--G.pixbufSave pbuf "/tmp/qq.png" "png" []
-		--img <- loadPngFile "/tmp/qq.png"
-		--return (getPixels img)
 		clrs <- pbuf `seq` (getPixelsFromPixbuf pbuf)
 		clrs `seq` return clrs
 		
@@ -517,11 +439,9 @@ dumpCellImgStat clrs g (icx,icy) =
 			((ix0,iy0),(_,_)) = bounds arr_r
 			(cwx, cwy) = (sx g, sy g)
 			cimg = ixmap ((1,1),(cwx, cwy)) (\(ix,iy) -> (ix + ix0 - 1, iy + iy0 - 1)) (fmapA (rgbtoint32.removegray.int32toRGB) arr_r)
-			--cimg = arr_r
-			fn = (printf "/home/gofman/Pictures/%02d_%02d.png" icx icy)::String
+			fn = (printf "./Pictures/%02d_%02d.png" icx icy)::String
 		imgnew <- newImage (cwx,cwy)
 		setIntArrPix imgnew (cimg)
-		--print $ sumA cimg
 		print ((icx,icy),(cellStat cimg))
 		savePngFile fn imgnew
 
@@ -544,7 +464,6 @@ evalPictures =
 		print g
 		forM_ [(icx,icy) | icx <- [1..nx g], icy <- [1..ny g]] (\ind -> dumpCellImgStat clrs g ind)
 		
-		--(wx, wy) <- imageSize img
 		let
 			((_,_),(wx,wy)) = bounds clrs
 		
@@ -557,8 +476,7 @@ evalPictures =
 			ff = parseField clrs g rs
 		useFontConfig True
 		forM_ (range $ bounds (getArr ff)) (\ind -> drawCell imgnew g ind (ff>!ind) )
-		savePngFile "/home/gofman/Pictures/qqq.png" imgnew
-		return ()
+		savePngFile "./Pictures/qqq.png" imgnew
 		
 getProbStr :: Prob -> String
 getProbStr prob = printf "%.0f%% (%s)" ((fromRational(toRational(prob)) :: Float)*100.0 ) (show prob)
@@ -568,13 +486,10 @@ adviseGuess g (prob,act) =
 		do
 			let 
 				probstr = getProbStr prob
-			--G.initGUI
 			dlg <- G.messageDialogNew Nothing [G.DialogModal] G.MessageInfo G.ButtonsClose "Estimated probability of guess"
-			--G.messageDialogSetSecondaryText dlg probstr
 			G.messageDialogSetSecondaryMarkup dlg ("<span foreground=\"blue\" size=\"x-large\">" ++ probstr ++ "</span>")
 			G.dialogRun dlg
 			setMouseTo g act
-			return ()
 			
 
 decodeImg :: Bool -> Bool -> Prob -> IO ()
@@ -690,7 +605,6 @@ decodeImg repeatact autoguess probprev =
 			decodeImg repeatact autoguess probprev
 		else
 			return ()
-		--savePngFile "/home/gofman/Pictures/qqq.png" imgnew
 
 
 parseArg :: (Bool, Bool) -> String -> (Bool, Bool)
@@ -702,7 +616,7 @@ parseArg _ (c:s) = error ("parse argument: unknown argument \'" ++ [c,'\''])
 parseArgs :: (Bool, Bool) -> [String] -> (Bool, Bool)
 parseArgs vals [] = vals
 parseArgs vals (('-':str):strs) = parseArgs (parseArg vals str) strs
-parseArgs vals (str:strs) = error ("parse arguments: could not parse \'" ++ str ++ "\'")
+parseArgs vals (str:_) = error ("parse arguments: could not parse \'" ++ str ++ "\'")
 			
 main :: IO ()
 main = 
@@ -717,5 +631,5 @@ main =
 			["-e"] -> evalPictures
 			_ -> 	do
 					(rep, guess) <- evaluate $ parseArgs (False,False) args
-					(decodeImg rep guess 1 >> return ())
+					decodeImg rep guess 1
 
