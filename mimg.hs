@@ -1,3 +1,4 @@
+import Data.Function
 import Graphics.GD
 import Data.Bits
 import Data.List
@@ -17,14 +18,20 @@ import Text.Printf
 import System.Environment
 --import GHC.Conc
 import Control.Exception
+import Debug.Trace
 
 data PictGeom = PictGeom { x1 :: Int, y1 :: Int, sx :: Int, sy :: Int, nx :: Int, ny :: Int} deriving(Show)
 
 
 data PictCellStat = PictCellStat { avghs::(Float,Float,Float), sq :: Float} deriving(Show)
+
+data PictCellTable = PictCellTable {getClosedThres :: Float, getx1Adj :: Int, gety1Adj :: Int, 
+	getGrAvgFunc :: (UArray (Int,Int) Int32 -> Float),
+	getHaveGrayDigs :: Bool,
+	getCellStat  :: [(PictCellStat,Cell)]}
 	
-statRefG :: [(PictCellStat, Cell)]
-statRefG = [
+statRefG :: PictCellTable
+statRefG = PictCellTable 0.85 0 0 grAvg False [
 		(PictCellStat {avghs=(0.0,0.0,0.0), sq=0.0}, Digit 0),
 		(PictCellStat {avghs=(240.0,0.95,0.51), sq=0.13}, Digit 1),
 		(PictCellStat {avghs=(120.0,0.9,0.35), sq=0.18}, Digit 2),
@@ -36,8 +43,8 @@ statRefG = [
 		(PictCellStat {avghs=(1.0,0.75,0.46), sq=0.435}, Mine)
 	  ]
 
-statRefK :: [(PictCellStat, Cell)]
-statRefK = [
+statRefK :: PictCellTable
+statRefK = PictCellTable 0.85 0 0 grAvg False [
 		(PictCellStat {avghs=(0.0,0.0,0.0), sq=0.0}, Digit 0),
 		(PictCellStat {avghs=(239.1,0.828,0.585), sq=0.196}, Digit 1),
 		(PictCellStat {avghs=(118.5,0.68,0.40), sq=0.233}, Digit 2),
@@ -49,6 +56,18 @@ statRefK = [
 		(PictCellStat {avghs=(0.0,0.86,0.43), sq=0.139}, Mine)
 	  ]
 
+statRefWin :: PictCellTable
+statRefWin = PictCellTable 0.9 13 75 grMax True [
+		(PictCellStat {avghs=(0.0,0.0,0.0), sq=0.0}, Digit 0),
+		(PictCellStat {avghs = (239.994,0.999975,0.4999875), sq = 0.15625}, Digit 1),
+		(PictCellStat {avghs = (119.99815,0.9999846,0.25097653), sq = 0.25390625}, Digit 2), --PictCellStat {avghs = (134.11502,0.9999804,0.2509755), sq = 0.19921875}
+		(PictCellStat {avghs = (0.0,0.9999839,0.49999195), sq = 0.2421875}, Digit 3),
+		(PictCellStat {avghs = (239.99571,0.9999822,0.2509759), sq = 0.21875}, Digit 4),
+		(PictCellStat {avghs = (0.0,0.9999857,0.25097683), sq = 0.2734375}, Digit 5),
+		(PictCellStat {avghs = (179.9975,0.9999861,0.25097692), sq = 0.28125}, Digit 6),
+		(PictCellStat {avghs=(-60,0.90,0.35), sq=0.164}, Digit 7),
+		(PictCellStat {avghs = (0.0,0.99994123,0.49997061), sq = 6.640625e-2}, Mine)
+	  ]
 
 fmapA :: (Ix i, IArray ar a, IArray ar b) => (a -> b) -> ar i a -> ar i b
 fmapA f arr = 
@@ -87,9 +106,6 @@ allPoints wx wy = [(a, b) | a <- [1..wx], b <- [1..wy]]
 
 allClrs wx wy = [(a, b) | a <- [1..wx], b <- [1..wy]]
 
-int_diff :: (Ord a, Num a) => a -> a -> a
-int_diff c1 c2 = min (2*abs(c2-c1)) 255
-
 cint32 c = fromIntegral(c) :: Int32
 
 color2int :: Color -> Int32
@@ -108,6 +124,11 @@ int32toRGB c32 = (r, g, b)
 		g = (shift c (-8)) .&. 255
 		r = (shift c (-16)) .&. 0xFF
 		
+intensitytoRGB :: Float -> (Int, Int, Int)
+intensitytoRGB v = (fv,fv, fv)
+	where
+		fv = round v
+
 getPixels :: Image -> UArray (Int, Int) Int32
 getPixels img =
 	array ((1,1),(wx,wy)) [ ((ix,iy),color2int $ unsafePerformIO $ getPixel (ix,iy) img) | ix <- [1..wx], iy <- [1..wy]]
@@ -158,7 +179,7 @@ acorr2max h v = g
 		(_,ny) = bounds h
 		ah0 = acorr h 0
 		av0 = acorr v 0
-		(m, g) = maximumBy (comparing fst) [ ( (acorr h gap)/ah0 + (acorr v gap)/av0, gap) | gap <- [5..((min nx ny) `div` 5)] ]
+		(m, g) = maximumBy (comparing fst) $ reverse [ ( (acorr h gap)/ah0 + (acorr v gap)/av0, gap) | gap <- [5..((min nx ny) `div` 5)] ]
 
 testShift :: UArray (Int) Float -> Int -> Int -> Int -> Float
 testShift hv sz shift n =
@@ -175,6 +196,9 @@ calcsxsy :: UArray (Int) Float -> UArray (Int) Float -> Int -> Int -> Int -> (In
 calcsxsy h v hsz nx ny = (calcShift v hsz nx, calcShift h hsz ny)
 
 calcnxny wx wy hsz sx sy = ((wx - sx) `div` hsz, (wy - sy) `div` hsz)
+
+int_diff :: (Ord a, Num a) => a -> a -> a
+int_diff c1 c2 = min (2*abs(c2-c1)) 255
 
 diff_x :: UArray (Int, Int) Float -> UArray (Int, Int) Float
 diff_x ints =
@@ -202,8 +226,8 @@ calcGeom clrs =
 		vs = vertsum $ diff_x ints
 		hsz = acorr2max hs vs
 		(nxc, nyc) = (30,16)
-		(_,oy) = calcsxsy hs vs hsz nxc nyc
-		ox = (wx - nxc*hsz) `div` 2
+		(ox,oy) = calcsxsy hs vs hsz nxc nyc
+		--ox = (wx - nxc*hsz) `div` 2
 
 removegray :: (Int, Int, Int) -> (Int, Int,Int)
 removegray (r, g, b)
@@ -253,16 +277,26 @@ cellStat cimg =
 		d = fmapA (nonzclr.removegray.int32toRGB) cimg
 		((x1,y1),(x2,y2)) = bounds d
 		square = sumA(d)/(fromIntegral(x2 - x1 + 1)*fromIntegral(y2 - y1 + 1))
-		
+
+hue_dist :: (Num a, Ord a) => a -> a -> a
+hue_dist h1 h2 = (min `on` abs) (h1 - h2) (h1 - 360 - h2)
+
 statDist :: PictCellStat -> PictCellStat -> Float
 statDist st1 st2 = 
+	(hue_dist h1 h2)/90.0 + abs(s1 - s2) + abs(br1 - br2) + 10*abs(sq1-sq2)
+	where
+		(h1,s1,br1) = avghs st1
+		(h2,s2,br2) = avghs st2
+		sq1 = sq st1
+		sq2 = sq st2
+{-| statDist st1 st2 = 
 	abs(h1 - h2)/100.0 + abs(s1 - s2) + 2*abs(sq1 - sq2) + abs(br1 - br2)
 	where
 		(h1,s1,br1) = avghs st1
 		(h2,s2,br2) = avghs st2
 		sq1 = sq st1
 		sq2 = sq st2
-
+-}
 
 avg :: (Integral a) => [a] -> Float
 avg lst = 
@@ -270,22 +304,30 @@ avg lst =
 	where
 		(sum,cnt) = foldl (\(s,cnt) x -> (s+x,cnt+1)) (0,0) lst
 
-parseGrayCell :: UArray (Int,Int) Int32 -> Cell
-parseGrayCell cimg 
-	| ravg < 0.85*255 = Digit 0
-	| otherwise = Closed
-	where 
-		ravg = avg $ fmap ((\(r,_,_)->r).int32toRGB.(cimg !)) (range $ bounds cimg)
+grAvg cimg = avg $ fmap ((\(r,_,_)->r).int32toRGB.(cimg !)) (range $ bounds cimg)
 
-parseCell :: [(PictCellStat, Cell)] -> UArray (Int,Int) Int32 -> Cell
-parseCell rstat cimg 
-	| (ct == Digit 0) = parseGrayCell cimg
+grMax :: UArray (Int,Int) Int32 -> Float
+grMax cimg = fromIntegral (maximum $ fmap ((\(r,_,_)->r).int32toRGB.(cimg !)) (range $ bounds cimg))
+
+grMin :: UArray (Int,Int) Int32 -> Float
+grMin cimg = fromIntegral (minimum $ fmap ((\(r,_,_)->r).int32toRGB.(cimg !)) (range $ bounds cimg))
+
+
+parseGrayCell :: UArray (Int,Int) Int32 -> Float -> (UArray (Int,Int) Int32 -> Float) -> Bool -> Cell
+parseGrayCell cimg closedThres avgFunc haveGrayDig
+	| haveGrayDig && (grMin cimg < 0.2*255) = Digit 7
+	| avgFunc cimg < closedThres*255 = {-| trace ("Digit 0: ravg="++(show ravg)++"\n") -} (Digit 0)
+	| otherwise = {-| trace ("closed: ravg="++(show ravg)++"\n") -} Closed
+
+parseCell :: PictCellTable -> UArray (Int,Int) Int32 -> Cell
+parseCell (PictCellTable closedThres _ _ grAvgFunc haveGrayDig rstat) cimg 
+	| ct == Digit 0 = parseGrayCell cimg closedThres grAvgFunc haveGrayDig
 	| otherwise = ct
 	where
 		stat = cellStat cimg
 		ct = snd (minimumBy (comparing fst) [ (statDist stat pcs, cl) | (pcs, cl) <- rstat])
 
-parseField :: UArray (Int,Int) Int32 ->  PictGeom -> [(PictCellStat, Cell)] -> Field
+parseField :: UArray (Int,Int) Int32 ->  PictGeom -> PictCellTable -> Field
 parseField img g rstat =
 	field $ array cbnds [(cind, parseCell rstat $ getCellPix img g (fst cind) (snd cind)) | cind <- range cbnds]
 	where
@@ -298,7 +340,7 @@ drawCell img g ind cell = void $
 		icx = (fst ind) - 1
 		icy = (snd ind) - 1
 	in
-		drawString "variable" 12.0 0.0 ((x1 g) + icx*(sx g),(y1 g)+12 + icy*(sy g)) s (rgba 255 0 0 0) img
+		drawString "bold" 8.0 0.0 ((x1 g) + icx*(sx g),(y1 g)+12 + icy*(sy g)) s (rgba 255 255 100 0) img
 		
 drawAction :: Image -> PictGeom -> Action -> IO ()
 drawAction img g (SetM ind) = void $
@@ -409,8 +451,19 @@ getPixelsFromPixbuf pbuf =
 		nch <- G.pixbufGetNChannels pbuf
 		clrsw <- pbData `seq` (MA.freeze pbData) :: IO (UArray Int Word32)
 		return $ clrsw `seq` (getPixelsFromPB clrsw wx wy rs nch)
-		
-grabWindow :: IO (UArray (Int, Int) Int32)
+	
+getRefStat :: IO PictCellTable
+getRefStat = 
+	do
+		winname <- readProcess "/usr/bin/xdotool" ["search","--onlyvisible","Mines","windowactivate","getwindowname"] ""
+		case winname of
+			"Mines\n" -> return statRefG
+			"KMines\n" -> return statRefK
+			"Minesweeper\n" -> return statRefWin
+			_ -> error ("Could not recognize window: " ++ winname)
+
+	
+grabWindow :: IO ((UArray (Int, Int) Int32), PictCellTable, PictGeom)
 grabWindow = 
 	do 
 		winidstr <- readProcess "xdotool" ["search","--onlyvisible", "Mines", "windowactivate","search","--onlyvisible", "Mines"] ""
@@ -426,9 +479,14 @@ grabWindow =
 		mpbuf <- wnd `seq` G.pixbufGetFromDrawable wnd (G.Rectangle 0 0 wx wy)
 		let
 			(Just pbuf) = mpbuf
-		
+
 		clrs <- pbuf `seq` (getPixelsFromPixbuf pbuf)
-		clrs `seq` return clrs
+		rs@(PictCellTable _ x1adj y1adj _ _ _) <- getRefStat
+		let
+			g = clrs `seq` (calcGeom clrs)
+			gadj = if x1adj /= 0 || y1adj /= 0 then g {x1 = x1adj, y1=y1adj} else g
+
+		clrs `seq` return (clrs, rs, gadj)
 		
 
 dumpCellImgStat :: UArray (Int, Int) Int32 -> PictGeom -> (Int,Int) -> IO ()
@@ -442,25 +500,13 @@ dumpCellImgStat clrs g (icx,icy) =
 			fn = (printf "./Pictures/%02d_%02d.png" icx icy)::String
 		imgnew <- newImage (cwx,cwy)
 		setIntArrPix imgnew (cimg)
-		print ((icx,icy),(cellStat cimg))
+		print ((icx,icy),cellStat cimg, (grAvg arr_r)/255)
 		savePngFile fn imgnew
-
-getRefStat :: IO [(PictCellStat, Cell)]
-getRefStat = 
-	do
-		winname <- readProcess "/usr/bin/xdotool" ["search","--onlyvisible","Mines","windowactivate","getwindowname"] ""
-		case winname of
-			"Mines\n" -> return $ statRefG
-			"KMines\n" -> return $ statRefK
-			_ -> error ("Could not recognize window: " ++ winname)
-
 
 evalPictures :: IO ()
 evalPictures = 
 	do 
-		clrs <- grabWindow
-		let 
-			g = calcGeom clrs
+		(clrs,rs,g) <- grabWindow
 		print g
 		forM_ [(icx,icy) | icx <- [1..nx g], icy <- [1..ny g]] (\ind -> dumpCellImgStat clrs g ind)
 		
@@ -468,10 +514,10 @@ evalPictures =
 			((_,_),(wx,wy)) = bounds clrs
 		
 		imgnew <- newImage (wx, wy)
+		--setIntArrPix imgnew (fmapA (rgbtoint32.intensitytoRGB) (diff_y (fmapA (intensity.int32toRGB) clrs)))
 		setIntArrPix imgnew clrs
 		forM_ [1..(ny g)] (\i -> setIntArrPix imgnew (fmapA (rgbtoint32.removegray.int32toRGB) (getCellPix clrs g i i)) )
 		
-		rs <- getRefStat
 		let 
 			ff = parseField clrs g rs
 		useFontConfig True
@@ -498,14 +544,11 @@ decodeImg repeatact autoguess probprev =
 		putStr "overall prob: "
 		putStrLn $ getProbStr probprev
 		
-		clrs <- grabWindow
+		(clrs,rs,g) <- grabWindow
 		
 		let 
 			((_,_),(wx,wy)) = bounds clrs
 		
-		let 
-			--pnts = allPoints wx wy
-			g = calcGeom clrs
 		print g
 		
 		--forM_ [1..(ny g)] (\i -> setIntArrPix imgnew (fmapA (rgbtoint32.removegray.int32toRGB) (getCellPix clrs g i i)) )
@@ -517,7 +560,6 @@ decodeImg repeatact autoguess probprev =
 		--setIntArrPix imgnew (fmapA (rgbtoint32.removegray.int32toRGB) (getCellPix clrs g 22 10))
 		--print ((22,10),(cellStat (getCellPix clrs g 22 10)))
 		
-		rs <- getRefStat
 		let 
 			ff = parseField clrs g rs
 		let ffu = initUpdateFld ff

@@ -1,7 +1,7 @@
 # mineplayer
 
 ## About
-A program which plays Minesweeper. Minesweeper window is captured and analyzed, and mouse clicks are sent to the Window. The program auto detects cells screen sizes (though too small cells may cause problem). Digits recognition is based on its color. A simle color statistics is computed and then a simple heuristics is used to match the statistics to digit recognition tables. Gnome Mines and KMines color schemes are currently recongnized (the choice between Gnome/KMines is based on window title).
+A program which plays Minesweeper. Minesweeper window is captured and analyzed, and mouse clicks are sent to the Window. The program auto detects cells screen sizes. Digits recognition is based on its color. A simle color statistics is computed and then a simple (but awkward) heuristics is used to match the statistics to digit recognition tables. Gnome Mines, KMines and WinMine (winxp version) color schemes are currently recongnized (the choice between game version is based on window title).
 
 Mine assumes 30x16 field sizes ('expert' mode).
 
