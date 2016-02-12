@@ -18,7 +18,6 @@ import Text.Printf
 import System.Environment
 --import GHC.Conc
 import Control.Exception
-import Debug.Trace
 
 data PictGeom = PictGeom { x1 :: Int, y1 :: Int, sx :: Int, sy :: Int, nx :: Int, ny :: Int} deriving(Show)
 
